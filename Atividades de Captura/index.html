@@ -170,7 +170,7 @@
     <!-- Portfolio Modals -->
     <div class="portfolio-modal modal fade" id="portfolioModal1" tabindex="-1" role="dialog" aria-hidden="true">
         <div class="modal-content">
-            <div class="close-modal" data-dismiss="modal">
+            <div class="close-modal" data-dismiss="modal" onclick="desativarVideo('video_canalha')">
                 <div class="lr">
                     <div class="rl">
                     </div>
@@ -182,9 +182,9 @@
                         <div class="modal-body">
                             <h2>Assista esse vídeo</h2>
                             <hr class="star-primary">
-                            <iframe width="560" height="315" src="https://www.youtube.com/embed/0XoXjHkpzcE" frameborder="0" allowfullscreen></iframe>
+                            <iframe id="video_canalha" width="560" height="315" src="https://www.youtube.com/embed/0XoXjHkpzcE?enablejsapi=1" frameborder="0" allowfullscreen></iframe>
                             <p>Veja esse vídeo do Canal Canalha que é muito engraçado</p>
-                            <button type="button" class="btn btn-default" data-dismiss="modal" onclick="desativarAtividade('portfolioModal1')"><i class="fa fa-times"></i> Concluir</button>
+                            <button type="button" class="btn btn-default" data-dismiss="modal" onclick="desativarAtividade('portfolioModal1');desativarVideo('video_canalha');"><i class="fa fa-times"></i> Concluir</button>
                         </div>
                     </div>
                 </div>

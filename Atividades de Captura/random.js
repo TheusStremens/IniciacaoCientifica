@@ -64,3 +64,7 @@ function desativarAtividade(portfolioModal1) {
 	}
 }
 
+function desativarVideo(videoId) {
+	$("#"+videoId).get(0).stopVideo();
+}
+
