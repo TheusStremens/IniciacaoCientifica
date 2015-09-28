@@ -1,0 +1,1 @@
+viewer.cpp -I src/tinythread/ -I include/ -lfreenect2 -lGL -lglfw && sudo ./a.out
