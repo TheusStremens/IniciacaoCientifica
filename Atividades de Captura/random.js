@@ -30,7 +30,7 @@ function sortearAtvidades() {
     //alert("I am an alert box!");
     var arr = [];
 	while(arr.length < 3){
-		var randomnumber=Math.floor(Math.random()*17 + 1);
+		var randomnumber=Math.floor(Math.random()*21 + 1);
 		var found=false;
 		for(var i=0;i<arr.length;i++){
 			if(arr[i]==randomnumber){
@@ -62,9 +62,5 @@ function desativarAtividade(portfolioModal1) {
 		if(x[i].getElementsByTagName("a")[0].href.split("#")[1].toString() == portfolioModal1.toString() )
 			x[i].setAttribute("style", "opacity: 0.5; pointer-events: none; cursor: default;");
 	}
-}
-
-function desativarVideo(videoId) {
-	$("#"+videoId).get(0).stopVideo();
 }
 
