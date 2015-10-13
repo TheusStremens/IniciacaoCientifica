@@ -1,1 +1,1 @@
-viewer.cpp -I src/tinythread/ -I include/ -lfreenect2 -lGL -lglfw && sudo ./a.out
+viewer.cpp -I src/tinythread/ -I include/ -lfreenect2 -lGL -lglfw `pkg-config --cflags --libs opencv` && sudo ./a.out

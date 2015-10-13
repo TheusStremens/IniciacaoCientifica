@@ -26,6 +26,8 @@
 
 
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <signal.h>
 
 #include <opencv2/opencv.hpp>
@@ -37,7 +39,6 @@
 #include <libfreenect2/packet_pipeline.h>
 
 #include "opencv2/core/core.hpp"
-#include "opencv2/face.hpp"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/objdetect/objdetect.hpp"
@@ -45,7 +46,6 @@
 
 using namespace cv;
 using namespace std;
-using namespace cv::face;
 
 const string PATH_CASCADE_FACE = "/home/matheusm/Cascades/ALL_Spring2003_3D.xml";
 // Image parameters
@@ -64,7 +64,7 @@ const string PATH_CASCADE_FACE = "/home/matheusm/Cascades/ALL_Spring2003_3D.xml"
 #define DEPTH_Z4 95.45454545        // Disparity to mm - 4th parameter (750*RESOLUTION)
 #define DEPTH_LTHRESHOLD 400        // Minimum disparity value
 #define DEPTH_CTHRESHOLD 675          // Maximum disparity value
-#define DEPTH_THRESHOLD 875         // Maximum disparity value
+#define DEPTH_THRESHOLD 570         // Maximum disparity value
 // Detection parameters
 #define X_WIDTH 1800.0            // Orthogonal projection width - in mm
 #define Y_WIDTH 1600.0            // Orthogonal projection height - in mm
@@ -82,16 +82,30 @@ const string PATH_CASCADE_FACE = "/home/matheusm/Cascades/ALL_Spring2003_3D.xml"
 #define MAX_ICP_ITERATIONS 200
 
 bool protonect_shutdown = false;
+bool firs_file = true;
+bool first_proj = true;
 
 void sigint_handler(int s)
 {
   protonect_shutdown = true;
 }
 
+//funcao pra gerar arquivo com nuvem de pontos
+void gravaNumevemPontos(string asLinha, char* asNomeArquivo) {
+	ofstream FILE;
+  if(firs_file) {
+    FILE.open(asNomeArquivo);
+    firs_file = false;
+  }
+  else
+	   FILE.open(asNomeArquivo, std::ios_base::app);
+	FILE << asLinha;
+	FILE.close();
+}
+
 // Compute rotation matrix and its inverse matrix
 void computeRotationMatrix(double matrix[3][3], double imatrix[3][3], double aX, double aY, double aZ) {
   double cosX, cosY, cosZ, sinX, sinY, sinZ, d;
-
   cosX = cos(aX);
   cosY = cos(aY);
   cosZ = cos(aZ);
@@ -144,11 +158,13 @@ void compute_projection(IplImage *p, IplImage *m, CvPoint3D64f *xyz, int n, doub
   // Compute projection
   cvSet(p, cvRealScalar(-DBL_MAX), NULL);
   cvSet(m, cvRealScalar(0), NULL);
+
   for(i=0; i < n; i++) {
     j = cy-cvRound(xyz[i].x*matrix[1][0]+xyz[i].y*matrix[1][1]+xyz[i].z*matrix[1][2]);
     k = cx+cvRound(xyz[i].x*matrix[0][0]+xyz[i].y*matrix[0][1]+xyz[i].z*matrix[0][2]);
     d = xyz[i].x*matrix[2][0]+xyz[i].y*matrix[2][1]+xyz[i].z*matrix[2][2];
-
+    //cout << j << " " << k << " " << d << endl;
+    //cout << i << endl;
     if(j >= 0 && k >= 0 && j < height && k < width && d > CV_IMAGE_ELEM(p, double, j, k)) {
       CV_IMAGE_ELEM(p, double, j, k) = d;
       CV_IMAGE_ELEM(m, uchar, j, k) = 1;
@@ -218,6 +234,7 @@ void compute_projection(IplImage *p, IplImage *m, CvPoint3D64f *xyz, int n, doub
     }
     k++;
   }
+
   // Final adjustments
   for(i=0; i < height; i++)
     for(j=0; j < width; j++) {
@@ -226,6 +243,19 @@ void compute_projection(IplImage *p, IplImage *m, CvPoint3D64f *xyz, int n, doub
       if(CV_IMAGE_ELEM(m, uchar, i, j))
         CV_IMAGE_ELEM(m, uchar, i, j) = 1;
     }
+  //save
+  if(first_proj) {
+    firs_file = true;
+    for(i=0; i < height; i++) {
+      for(j=0; j < width; j++) {  
+        std::ostringstream buff;
+        buff << "v " << j << " " << i << " " << CV_IMAGE_ELEM(p, double, i, j) << endl;
+        string linha = buff.str();  
+        gravaNumevemPontos(linha, "projecao.obj");
+      }
+    }
+    first_proj = false;
+  }
 }
 
 float fx;
@@ -265,7 +295,7 @@ void xyz2depth(CvPoint3D64f *pt, int *i, int *j, int *s, Mat xycords) {
   xyz[i].y = (y - cy) * xyz[i].z / fy;*/
 }
 
-vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int maxY, int minZ, int maxZ, Mat xycords) {
+void face_detection(Mat depth_image, int minX, int maxX, int minY, int maxY, int minZ, int maxZ, Mat xycords, vector<Vec4i> &faces) {
   
   static CvPoint3D64f *xyz, *list, *clist;
   CvPoint3D64f avg;
@@ -282,16 +312,28 @@ vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int
   
   if(flag)
     xyz = (CvPoint3D64f *) malloc(SIZE*sizeof(CvPoint3D64f));
-  for (uint i = 0; i < pixel_count; ++i)
+
+  int n = 0;
+  for (uint i = 0; i < pixel_count; i++)
   {
       cv::Vec2f xy = xycords.at<cv::Vec2f>(0, i);
       x = xy[1]; y = xy[0];
-      xyz[i].z = -(static_cast<float>(*ptr)) * (1000.0f); // Converte metros pra mm
-      xyz[i].x = -(x - cx) * xyz[i].z / fx;
-      xyz[i].y = (y - cy) * xyz[i].z / fy;
+      double dpt = -(static_cast<float>(*ptr)) * (1000.0f); // Converte metros pra mm
+      if(-dpt < DEPTH_THRESHOLD) {
+        xyz[n].z = dpt;
+        xyz[n].x = -(x - cx) * xyz[n].z / fx;
+        xyz[n].y = -(y - cy) * xyz[n].z / fy;
+        if(xyz[n].z < menor)
+          menor = xyz[n].z;
+        if(flag) {
+          std::ostringstream buff;
+          buff << "v " << xyz[n].x << " " << xyz[n].y << " " << xyz[n].z << endl;
+          string linha = buff.str();  
+          gravaNumevemPontos(linha, "nuvemPontos.obj");
+        }
+        n++;
+      }
       ++ptr;
-      if(xyz[i].z < menor)
-        menor = xyz[i].z;
   }
   background = menor + 100.0;
 
@@ -300,7 +342,6 @@ vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int
 
       width = (int)(X_WIDTH*RESOLUTION);
       height = (int)(X_WIDTH*RESOLUTION);
-
       CX = width/2;
       CY = height/2;
 
@@ -319,20 +360,21 @@ vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int
       clist = list+1000;
   }
 
-  int i, j, k = 0, l, n, aX, aY, aZ;
+  int i, j, k = 0, l, aX, aY, aZ;
 
   Mat colored;
   for(aX=minX, k=0; aX <= maxX; aX += 10) {
     for(aY=minY; aY <= maxY; aY += 10) {
       for(aZ=minZ; aZ <= maxZ; aZ += 10) {
-        
         if(aX+aY+aZ > 30)
           continue;
-        
+        /*aX = 0;
+        aY = 0;
+        aZ = 0;*/
         computeRotationMatrix(matrix, imatrix, aX*0.017453293, aY*0.017453293, aZ*0.017453293);
-        compute_projection(p, m, xyz, pixel_count, matrix, background);
-        
-        menor = 999999.0; 
+        compute_projection(p, m, xyz, n, matrix, background);
+
+        /*menor = 999999.0; 
         for(i = 0; i < width; i++) {
           for(j = 0; j < height; j++) {
             double x = CV_IMAGE_ELEM(p, double, i, j);
@@ -353,17 +395,16 @@ vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int
               CV_IMAGE_ELEM(p, double, i, j) = (x * a) + b;
           }
         }
+
         #if 1
         Mat projecao= cv::cvarrToMat(p); 
         
-        Mat1b x(projecao.rows, projecao.cols);
+        Mat1b projecao_colorida(projecao.rows, projecao.cols);
         for(i = 0; i < projecao.rows; i++)
           for(j = 0; j < projecao.cols; j++) 
-            x.at<uint8_t>(i, j) = projecao.at<double>(i, j);
-        
-        applyColorMap(x, colored, COLORMAP_JET);
-        
-        #endif
+            projecao_colorida.at<uint8_t>(i, j) = projecao.at<double>(i, j);
+        applyColorMap(projecao_colorida, colored, COLORMAP_JET);
+        #endif*/
 
         cvIntegral(p, sum, sqsum, tiltedsum);
         cvIntegral(m, msum, NULL, NULL);
@@ -380,7 +421,7 @@ vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int
           for(j=0; j < width-20; j++)
             if(CV_IMAGE_ELEM(msum, int, i+FACE_SIZE, j+FACE_SIZE)-CV_IMAGE_ELEM(msum, int, i, j+FACE_SIZE)-CV_IMAGE_ELEM(msum, int, i+FACE_SIZE, j)+CV_IMAGE_ELEM(msum, int, i, j) == 441)
               if(cvRunHaarClassifierCascade(face_cascade, cvPoint(j,i), 0) > 0) {
-                rectangle(colored, Point(j, i), Point(j+21, i+21), CV_RGB(0,255,0));
+                //rectangle(colored, Point(j, i), Point(j+21, i+21), CV_RGB(0,255,0));
                 X = (j+FACE_HALF_SIZE-CX)/RESOLUTION;
                 Y = (CY-i-FACE_HALF_SIZE)/RESOLUTION;
                 Z = (CV_IMAGE_ELEM(sum, double, i+FACE_HALF_SIZE+6, j+FACE_HALF_SIZE+6)-CV_IMAGE_ELEM(sum, double, i+FACE_HALF_SIZE-5, j+FACE_HALF_SIZE+6)-CV_IMAGE_ELEM(sum, double, i+FACE_HALF_SIZE+6, j+FACE_HALF_SIZE-5)+CV_IMAGE_ELEM(sum, double, i+FACE_HALF_SIZE-5, j+FACE_HALF_SIZE-5))/121.0/RESOLUTION;
@@ -395,10 +436,10 @@ vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int
     }
   }
   // Merge multiple detections
-  cv::imshow("Imagem de Projecao", colored);
+  //cv::imshow("Imagem de Projecao", colored);
   vector<Vec4i> r;
   Vec4i tmp;
-
+  cout << k << endl;
   while(k > 0) {
 
     avg.x = clist[0].x = list[0].x;
@@ -430,7 +471,7 @@ vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int
     xyz2depth(&avg, &tmp[1], &tmp[0], &tmp[2], xycords);
     
     tmp[3] = j;
-    r.push_back(tmp);
+    faces.push_back(tmp);
 
     j=0;
     
@@ -444,16 +485,19 @@ vector<Vec4i> face_detection_(Mat depth_image, int minX, int maxX, int minY, int
     k=j;
     
   }
-  return r;
+  //computeRotationMatrix(matrix, imatrix, 0*0.017453293, -20*0.017453293, 0*0.017453293);
+  //compute_projection(p, m, xyz, pixel_count, matrix, background);
+  //cout << "Fim da deteccao" << endl;
+  //return r;
 }
 
-vector<Vec4i> face_detection(Mat depth, Mat xycords) {
-  return face_detection_(depth, 0, 30, -20, 20, 0, 0, xycords);
-}
+/*void face_detection(Mat depth, Mat xycords, vector<Vec4i> &faces) {
+  face_detection_(depth, 0, 30, -20, 20, 0, 0, xycords, faces);
+}*/
 
-vector<Vec4i> frontal_face_detection(Mat depth, Mat xycords) {
+/*vector<Vec4i> frontal_face_detection(Mat depth, Mat xycords) {
   return face_detection_(depth, 0, 0, 0, 0, 0, 0, xycords);
-}
+}*/
 
 int main(int argc, char *argv[])
 {
@@ -561,7 +605,7 @@ int main(int argc, char *argv[])
 
   Mat xycords = cv_img_corrected_cords;
   
-  vector<Vec4d> faces;
+  
   while(!protonect_shutdown)
   {
     listener.waitForNewFrame(frames);
@@ -569,17 +613,19 @@ int main(int argc, char *argv[])
     Mat depth_image = cv::Mat(depth->height, depth->width, CV_32FC1, depth->data) / 4500.0f;
 
     vector<Vec4i> faces;
-    faces = frontal_face_detection(depth_image, xycords);
+    face_detection(depth_image, 0, 30, -20, 20, 0, 0, xycords, faces);
+    //cout << "chegou aki" << endl;
 
     double min;
     double max;
     cv::minMaxIdx(depth_image, &min, &max);
+    //cout << max*1000 << endl;
     cv::Mat auxiliar;
     // expand your range to 0..255. Similar to histEq();
     depth_image.convertTo(auxiliar,CV_8UC1, 255 / (max-min), -min); 
     cv::Mat depth_colorida;
-    applyColorMap(auxiliar, depth_colorida, cv::COLORMAP_JET);
 
+    applyColorMap(auxiliar, depth_colorida, cv::COLORMAP_JET);
 
     for(int i=0; i < faces.size(); i++)
       rectangle(depth_colorida, Point(faces[i][0]-faces[i][2],faces[i][1]-faces[i][2]), Point(faces[i][0]+faces[i][2],faces[i][1]+faces[i][2]), CV_RGB(0,255,0), 2, 8, 0);
