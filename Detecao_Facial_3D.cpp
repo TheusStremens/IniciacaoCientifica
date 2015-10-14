@@ -64,7 +64,7 @@ const string PATH_CASCADE_FACE = "/home/matheusm/Cascades/ALL_Spring2003_3D.xml"
 #define DEPTH_Z4 95.45454545        // Disparity to mm - 4th parameter (750*RESOLUTION)
 #define DEPTH_LTHRESHOLD 400        // Minimum disparity value
 #define DEPTH_CTHRESHOLD 675          // Maximum disparity value
-#define DEPTH_THRESHOLD 570         // Maximum disparity value
+#define DEPTH_THRESHOLD 170         // Maximum disparity value
 // Detection parameters
 #define X_WIDTH 1800.0            // Orthogonal projection width - in mm
 #define Y_WIDTH 1600.0            // Orthogonal projection height - in mm
@@ -271,12 +271,12 @@ float k3;
 void xyz2depth(CvPoint3D64f *pt, int *i, int *j, int *s, Mat xycords) {
   float x, y;
   x = (fx * pt->x)/pt->z + cx;
-  y = -(fy * pt->y)/pt->z + cy;
-  *s = 65.0;
+  y = (fy * pt->y)/pt->z + cy;
+  //*s = 65.0;
   int p;
   for(p = 0; p < 217088; p++) {
     cv::Vec2f xy = xycords.at<cv::Vec2f>(0, p);
-    if(fabs(x - xy[1]) < 0.9 && fabs(y - xy[0]) < 0.9)
+    if(fabs(x - xy[1]) < 0.7 && fabs(y - xy[0]) < 0.7)
       break;
   }
   if(p < 512) {
@@ -287,7 +287,7 @@ void xyz2depth(CvPoint3D64f *pt, int *i, int *j, int *s, Mat xycords) {
     *i = p / 512;
     *j = p % 512;
   }
-  
+  *s = fabs(((pt->x+180.0)/pt->z)*fx+cx-*j);
   /*cv::Vec2f xy = xycords.at<cv::Vec2f>(0, i);
   x = xy[1]; y = xy[0];
   xyz[i].z = -(static_cast<float>(*ptr)) * (1000.0f); // Converte metros pra mm
@@ -321,8 +321,8 @@ void face_detection(Mat depth_image, int minX, int maxX, int minY, int maxY, int
       double dpt = -(static_cast<float>(*ptr)) * (1000.0f); // Converte metros pra mm
       if(-dpt < DEPTH_THRESHOLD) {
         xyz[n].z = dpt;
-        xyz[n].x = -(x - cx) * xyz[n].z / fx;
-        xyz[n].y = -(y - cy) * xyz[n].z / fy;
+        xyz[n].x = (x - cx) * xyz[n].z / fx;
+        xyz[n].y = (y - cy) * xyz[n].z / fy;
         if(xyz[n].z < menor)
           menor = xyz[n].z;
         if(flag) {
@@ -335,7 +335,7 @@ void face_detection(Mat depth_image, int minX, int maxX, int minY, int maxY, int
       }
       ++ptr;
   }
-  background = menor + 100.0;
+  background = menor-110;
 
   if(flag) {
       flag = 0;
@@ -439,7 +439,7 @@ void face_detection(Mat depth_image, int minX, int maxX, int minY, int maxY, int
   //cv::imshow("Imagem de Projecao", colored);
   vector<Vec4i> r;
   Vec4i tmp;
-  cout << k << endl;
+  //cout << k << endl;
   while(k > 0) {
 
     avg.x = clist[0].x = list[0].x;
@@ -491,13 +491,13 @@ void face_detection(Mat depth_image, int minX, int maxX, int minY, int maxY, int
   //return r;
 }
 
-/*void face_detection(Mat depth, Mat xycords, vector<Vec4i> &faces) {
-  face_detection_(depth, 0, 30, -20, 20, 0, 0, xycords, faces);
-}*/
+void face_detection(Mat depth, Mat xycords, vector<Vec4i> &faces) {
+  face_detection(depth, 0, 30, -20, 20, 0, 0, xycords, faces);
+}
 
-/*vector<Vec4i> frontal_face_detection(Mat depth, Mat xycords) {
-  return face_detection_(depth, 0, 0, 0, 0, 0, 0, xycords);
-}*/
+void frontal_face_detection(Mat depth, Mat xycords, vector<Vec4i> &faces) {
+  face_detection(depth, 0, 0, 0, 0, 0, 0, xycords, faces);
+}
 
 int main(int argc, char *argv[])
 {
@@ -611,15 +611,15 @@ int main(int argc, char *argv[])
     listener.waitForNewFrame(frames);
     libfreenect2::Frame *depth = frames[libfreenect2::Frame::Depth];
     Mat depth_image = cv::Mat(depth->height, depth->width, CV_32FC1, depth->data) / 4500.0f;
-
+    //Mat depth_image = cv::Mat(depth->height, depth->width, CV_32FC1, depth->data);
     vector<Vec4i> faces;
-    face_detection(depth_image, 0, 30, -20, 20, 0, 0, xycords, faces);
+    frontal_face_detection(depth_image, xycords, faces);
     //cout << "chegou aki" << endl;
 
     double min;
     double max;
     cv::minMaxIdx(depth_image, &min, &max);
-    //cout << max*1000 << endl;
+    //cout << max << endl;
     cv::Mat auxiliar;
     // expand your range to 0..255. Similar to histEq();
     depth_image.convertTo(auxiliar,CV_8UC1, 255 / (max-min), -min); 
