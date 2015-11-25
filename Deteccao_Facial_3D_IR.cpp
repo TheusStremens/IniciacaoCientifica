@@ -13,6 +13,8 @@
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/objdetect/objdetect.hpp"
 #include <opencv2/video/tracking.hpp>
+#include <limits>
+#include <math.h>
 
 using namespace cv;
 using namespace std;
@@ -24,7 +26,7 @@ const string PATH_CASCADE_FACE = "/home/matheusm/Cascades/ALL_Spring2003_3D.xml"
 #define SIZE 217088             // Input image size
 // Calibration parameters
 #define DEPTH_THRESHOLD 170         // Maximum disparity value
-#define JUMP 36 //amostragem da imagem 3D para criacao da nuvem de pontos
+#define JUMP 6 //amostragem da imagem 3D para criacao da nuvem de pontos
 // Detection parameters
 #define X_WIDTH 1800.0            // Orthogonal projection width - in mm
 #define Y_WIDTH 1600.0            // Orthogonal projection height - in mm
@@ -37,6 +39,9 @@ bool firs_file = true;
 bool first_proj = true;
 
 int Taxa_Deteccao = 0, Qtd_Frames = 0;
+
+libfreenect2::Frame undistorted(512, 424, 4), registered(512, 424, 4);
+libfreenect2::Registration* registration;
 
 void sigint_handler(int s)
 {
@@ -123,7 +128,6 @@ void compute_projection(IplImage *p, IplImage *p_ir, IplImage *m, CvPoint3D64f *
       CV_IMAGE_ELEM(m, uchar, j, k) = 1;
     }
   }
-
   // Hole filling
   k=l=0;
   for(i=1; i < height-1; i++)
@@ -229,7 +233,7 @@ float p2;
 float k3;
 //converte ponto xyz para ponto na imagem
 void xyz2depth(CvPoint3D64f *pt, int *i, int *j, int *s, Mat xycords) {
-  float x, y;
+  /*float x, y;
   double ptX, ptY, ptZ;
   ptZ = (pt->z-80)*2.1;
   ptX = pt->x;
@@ -250,7 +254,18 @@ void xyz2depth(CvPoint3D64f *pt, int *i, int *j, int *s, Mat xycords) {
   else {
     *i = p / 512;
     *j = p % 512;
-  }
+  }*/
+    /*x = (c + 0.5 - cx) * fx * depth_val;
+    y = (r + 0.5 - cy) * fy * depth_val;
+    z = depth_val;*/
+    double ptX, ptY, ptZ;
+    ptX = pt->x/100.0f;
+    ptY = -pt->y/100.0f;
+    ptZ = -pt->z/100.0f;
+    const float FX(1/fx), FY(1/fy);
+    *j = -0.5*ptZ + cx + (ptX/(FX*ptZ));
+    *i = -0.5*ptZ + cy + (ptY/(FY*ptZ));
+    *s = 65;
 }
 //Funcao principal de detecao facial
 void face_detection(Mat depth_image, Mat ir_image, int minX, int maxX, int minY, int maxY, int minZ, int maxZ, Mat xycords, vector<Vec4i> &faces) {
@@ -262,7 +277,7 @@ void face_detection(Mat depth_image, Mat ir_image, int minX, int maxX, int minY,
   float* ptr = (float*) (depth_image.data);
   float* ir_ptr = (float*) (ir_image.data);
   static CvHaarClassifierCascade *face_cascade;
-  float x = 0.0f, y = 0.0f;
+  //float x = 0.0f, y = 0.0f;
   uint pixel_count = depth_image.rows * depth_image.cols;
   double menorX = 999999.0, menorY = 999999.0, menor = 999999.0;
   double maiorX = 0.0, maiorY = 0.0, maior = 0.0;
@@ -277,7 +292,31 @@ void face_detection(Mat depth_image, Mat ir_image, int minX, int maxX, int minY,
 
   int n = 0;
   //criacao da nuvem de pontos 3D xyz
-  for (uint i = 0; i < pixel_count; i+=JUMP)
+  float x, y, z, rgb, dpt;
+  const float bad_point = std::numeric_limits<float>::quiet_NaN();
+  for (int r=0; r<424; r+=JUMP)
+  for (int c=0; c<512; c+=JUMP) {
+    dpt = depth_image.at<float>(r,c)*1000.0f;
+    if(dpt < DEPTH_THRESHOLD) {
+      registration->getPointXYZRGB(&undistorted, &registered, r,c, x,y,z,rgb);
+      if(x == x || y==y || z==z) {
+        xyz[n].z = -z * 100.0f;
+        xyz[n].y = -y * 100.0f;
+        xyz[n].x = x * 100.0f;
+        if(xyz[n].z < menor)
+          menor = xyz[n].z;
+        intensidade[n] = ir_image.at<float>(r,c)*1000.0f;
+        if(flag) {
+            std::ostringstream buff;
+            buff << "v " << xyz[n].x << " " << xyz[n].y << " " << xyz[n].z << endl;
+            string linha = buff.str();  
+            gravaNumevemPontos(linha, "nuvemPontos.obj");
+        }
+        n++;
+      }
+    }
+  }
+  /*for (uint i = 0; i < pixel_count; i+=JUMP)
   {
       cv::Vec2f xy = xycords.at<cv::Vec2f>(0, i);
       x = xy[1]; y = xy[0];
@@ -303,8 +342,8 @@ void face_detection(Mat depth_image, Mat ir_image, int minX, int maxX, int minY,
       }
       ptr+=JUMP;
       ir_ptr+=JUMP;
-  }
-  background = menor-110;
+  }*/
+  background = menor;
   ///iniciazliacao de variaveis da projecao
   if(flag) {
       flag = 0;
@@ -498,6 +537,8 @@ void frontal_face_detection(Mat depth, Mat ir, Mat xycords, vector<Vec4i> &faces
   face_detection(depth, ir, 0, 0, 0, 0, 0, 0, xycords, faces);
 }
 
+
+
 int main(int argc, char *argv[])
 {
   std::string program_path(argv[0]);
@@ -576,7 +617,7 @@ int main(int argc, char *argv[])
   dev->start();
   std::cout << "device serial: " << dev->getSerialNumber() << std::endl;
   std::cout << "device firmware: " << dev->getFirmwareVersion() << std::endl;
-  size_t framecount = 0;
+  registration = new libfreenect2::Registration(dev->getIrCameraParams(), dev->getColorCameraParams());
   //inicializacao dos parametros da camera
   fx = dev->getIrCameraParams().fx;
   fy = dev->getIrCameraParams().fy;
@@ -625,22 +666,10 @@ int main(int argc, char *argv[])
     cv::resize(color_image, color_image, Size(color_image.cols/2, color_image.rows/2), 1.0, 1.0, INTER_CUBIC);
     vector<Vec4i> faces;
 
-   
-    vector< Rect_<int> > faces_ir;
-    CascadeClassifier haar_cascade;
-    haar_cascade.load(PATH_CASCADE_FACE_IR);
-    ir_image.convertTo(ir_image, CV_8UC3, 255, 0);
-    haar_cascade.detectMultiScale(ir_image, faces_ir);
-    for(int i = 0; i < faces_ir.size(); i++) {
-      Rect face_i = faces_ir[i];
-      rectangle(ir_image, face_i, CV_RGB(0, 0, 255), 1);
-      rectangle(color_image, face_i, CV_RGB(0, 0, 255), 1);
-    }
-    imshow("IR", ir_image);
-    imshow("2D", color_image);
-    /*
+    registration->apply(color, depth, &undistorted, &registered);
+    Mat registered_image = cv::Mat(registered.height, registered.width, CV_8UC4, registered.data);
     //deteca as faces
-    frontal_face_detection(depth_image, ir_image, xycords, faces);
+    face_detection(depth_image, ir_image, xycords, faces);
     //gera imagem colorida de profundidade
     double min;
     double max;
@@ -651,8 +680,8 @@ int main(int argc, char *argv[])
     applyColorMap(auxiliar, depth_colorida, cv::COLORMAP_JET);
     //marcar as faces na imagem colorida
     for(int i=0; i < faces.size(); i++)
-      rectangle(depth_colorida, Point(faces[i][0]-faces[i][2],faces[i][1]-faces[i][2]), Point(faces[i][0]+faces[i][2],faces[i][1]+faces[i][2]), CV_RGB(0,255,0), 2, 8, 0);
-    */
+      rectangle(registered_image, Point(faces[i][0]-faces[i][2],faces[i][1]-faces[i][2]), Point(faces[i][0]+faces[i][2],faces[i][1]+faces[i][2]), CV_RGB(0,255,0), 2, 8, 0);
+    imshow("Deteccao", registered_image);
     int key = cv::waitKey(1);
     protonect_shutdown = protonect_shutdown || (key > 0 && ((key & 0xFF) == 27)); // shutdown on escape
     listener.release(frames);
